@@ -1,8 +1,10 @@
 ---
 alwaysApply: true
+applyTo:
+  - "src/**"
 ---
 
-# OUTLINE #
+# OUTLINE
 This is a complete guideline of how to write code in this repository.
 Do not show too much freedom away from the instruction written in this markdown.
 This architecture is named the "Mono-Lightweight" architecture.
@@ -11,7 +13,7 @@ This guideline provides coding guides that must be complied imperatively.
 
 --------------------
 
-# BACKGROUND INFORMATION #
+# BACKGROUND INFORMATION
 This repository uses:
 - Next.js
 - Supabase
@@ -24,7 +26,7 @@ This repository aims to construct a website using Next.js, easily scalable yet l
 
 --------------------
 
-# ARCHITECTURE OVERVIEW #
+# ARCHITECTURE OVERVIEW
 The repository structure is as follows:
 .
 └── src/
@@ -63,7 +65,7 @@ This the blueprint of the repository with only the sign in feature. There may be
 
 --------------------
 
-# PAGES BLOCK #
+# PAGES BLOCK
 The pages block refers to the files that construct the webpages in a Next.js project, within the src/app folder.
 In the Mono-Lightweight architecture, the purpose of the page.tsx file is to show the abstract visual layout of the page.
 In so doing, the complex state management and functions are hidden into the subordinate *widgets* (explained later).
@@ -86,7 +88,7 @@ There is no need to add the `"use server"` directive, as it is set by default.
 
 --------------------
 
-# COMPONENT BLOCK #
+# COMPONENT BLOCK
 The component block refers to the base UI pieces, such as base button, input, etc.
 For this purpose, we use the Shadcn component set.
 Generally, there is no need to modify this block, although adding new base components using the `npx shadcn@latest add` directive.
@@ -95,14 +97,14 @@ These handlers and functions are to be added to the *widget* blocks.
 
 --------------------
 
-# FEATURE BLOCK #
+# FEATURE BLOCK
 The Mono-Lightweight architecture resembles the FSD architecture in that functions are grouped around each feature.
 Each feature block contains:
 - **widgets** for UI representation
 - **actions** (which are Next.js's server actions) which handles communication with the database, server, etc.
 - **hooks** (which are custom hooks) that preprocesses user's request, calls *actions*, and returns the results of the *action* to the client, including state management, alerts, toast, etc.
 
-## WIDGETS ##
+## WIDGETS
 The widget block is a mixture of *component* block(or blocks) and hooks(as required).
 The purpose of this block is to encapsulate a feature with a UI representation to simplify the *page* block.
 A widget block may be as simple as a button with a sign in hook attached or may be complex as a form that takes all data and calls a hook handler.
@@ -147,7 +149,7 @@ export default function SignInForm() {
 }
 ```
 
-## ACTIONS ##
+## ACTIONS
 The *actions* block uses Next.js server actions.
 An *action* does not:
 1. route the user to another page
@@ -157,22 +159,27 @@ Instead return a response or an error, encapsulated in a `Response` interface(se
 A REST style api call is necessary to use an exernal service or a service initiated by the infrastructure block happens in the *actions* block.
 Every time an error is identified, throw a server console error.
 See the example below.
+Every action file starts with `"use server"`.
+Perform auth/authorization checks **inside** the action before DB calls.
 
 ```tsx
-export interface Response<T> {
-  data: T | null;
-  error: string | null;
-}
+export type ActionResponse<T> =
+  | { ok: true; data: T }
+  | { ok: false; error: string; code?: string };
+
+function ok<T>(data: T): Result<T> { return { ok: true, data }; }
+function fail(error: string, code?: string): Result<never> { return { ok: false, error, code }; }
+
 ```
 
 ```tsx
 "use server"
 
 import { createClient } from "@/infrastructures/supabase/server";
-import { Response } from "@/lib/types";
+import { ActionResponse } from "@/lib/types";
 import { Tables } from "@/database.types";
 
-export async function signInAction(email: string, password: string): Promise<Response<
+export async function signInAction(email: string, password: string): Promise<ActionResponse<
   { user: Tables<"user">; settings: Tables<"settings"> } | null>> {
     
   const supabase = await createClient();
@@ -209,7 +216,7 @@ export async function signInAction(email: string, password: string): Promise<Res
 }
 ```
 
-## HOOKS ##
+## HOOKS
 The *hook* block:
 1. takes a user event(ex. click, input, etc.),
 2. pre-processes the event,
@@ -281,7 +288,7 @@ export function useSignIn() {
 
 --------------------
 
-# INFRASTRUCTURE BLOCK #
+# INFRASTRUCTURE BLOCK
 The *infrastructure* block is where an external service is initiated with necessary keys.
 This block is generally given from the developer.
 **DO NOT** modify this block unless explicitly directed to.
@@ -307,10 +314,10 @@ export const CHAT_MODELS = {
 
 --------------------
 
-# LIB #
+# LIB
 The *lib* block is just a folder for all other necessary code, including **utils**, **types**, and **states**.
 
-## STATES ##
+## STATES
 The *states* part is used when a global state management is used.
 Of note, this architecture heavily relies on global state management for the following reasons:
 - each *widget* needs to be independent from each other, that is, not in the same inheritance tree, for code conciseness and readability issues;\
@@ -318,6 +325,11 @@ Of note, this architecture heavily relies on global state management for the fol
 Considering the characteristics of each state, use `persist` for optimization purposes.
 For example, the `user` state, which holds information about a user's(received after logging in), is better off with persistance, as it does not change frequently.
 Below is a state store initiator using Zustand with persistance.
+Additional rules:
+- Create **small, focused stores** per domain; do not create one mega-store.
+- Export **selector-based hooks**: `useUserStore(s => s.user)`.
+- Model actions as **events** (`login`, `logout`) rather than arbitrary setters.
+- Use `persist` only for low-sensitivity data (e.g., theme, layout). Do **not** persist tokens or secrets.
 
 ```tsx
 import { create } from "zustand";
@@ -341,13 +353,13 @@ export default useUserStore;
 
 ```
 
-## PROMPTS ##
+## PROMPTS
 The use of the *prompts* section depends on whether an LLM services is used.
 Prompts are separated into the *lib* block, as it is used in the *actions* block but holds irrelevant information for the execution of the function itself.
 Use the `#{variable}` format; this is to extract a variable in the following method:
 ```tsx
-const str = "Hello #{userName}, your id is #{user_id}.";
-const vars = [...str.matchAll(re)].map(m => m[1]);
+const PROMPT_VAR_RE = /#\{\s*([A-Za-z_][A-Za-z0-9_]*)\s*\}/g;
+const vars = [...str.matchAll(PROMPT_VAR_RE)].map(m => m[1]);
 ```
 
 ```tsx
@@ -369,9 +381,32 @@ Response with only the category name, in the following JSON format:
 
 --------------------
 
-# TABLE & TYPE MANAGEMENT #
+# TABLE & TYPE MANAGEMENT
 This project uses Supabase as database.
 Whenever a table is modified, use the following line ("$PROJECT_REF" being replaced with the actual project ID) to receive the updated database types.
 ```bash
 npx supabase gen types typescript --project-id "$PROJECT_REF" --schema public > src/database.types.ts
 ```
+
+--------------------
+
+# ADDITIONAL CONSTRAINTS & RESTRAINTS
+## DO:
+- Use TypeScript, no `any`; prefer explicit generics.
+- Prefer React Server Components; mark client files with `"use client"` only when needed.
+- Propose **minimal** diffs and reference existing helpers before creating new ones.
+- For mutating code, emit: (1) file path, (2) complete patch.
+## DO NOT:
+- Use the Next.js API routes.(i.e. files in the app/api folder).
+## SUPABASE & SECURITY
+- RLS must be enabled on all tables. Add indexes on columns used in RLS policies (e.g., `user_id`). 
+- Never ship `service_role` to the client; use cookie-based session on the server client.
+- Queries must always filter by the policy predicate fields (e.g., `eq("user_id", ...)`) to help the planner. 
+## NAMING CONVENTIONS
+- actions: *.action.ts (server)
+- hooks: use-*.ts (client only)
+- widgets: *.tsx (client only if needed)
+- stores: *.store.ts
+## ERROR TAXONOMY
+ERR_AUTH, ERR_INPUT, ERR_NOT_FOUND, ERR_CONFLICT, ERR_UNKNOWN
+
